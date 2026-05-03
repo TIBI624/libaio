@@ -56,9 +56,3 @@ _deps/
 *.swp
 *.swo
 *.tmp
-
-# Keeping only source
-!libaio.cpp
-!README.md
-!LICENSE
-!.gitignore
