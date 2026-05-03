@@ -1,0 +1,64 @@
+# OS Junk
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.stackdump
+.fuse_hidden
+*.directory
+.Trash-*
+
+# Compilations & Binaries
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+*.out
+*.log
+build.log
+
+# Android & NDK
+.idea/
+*.iml
+.gradle/
+local.properties
+.cxx/
+.externalNativeBuild/
+build/
+bin/
+gen/
+obj/
+libs/
+jniLibs/
+
+# Build Tools
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+_deps/
+
+# IDEs & Editors
+.vscode/
+*.code-workspace
+*~
+*.swp
+*.swo
+*.tmp
+
+# Keeping only source
+!libaio.cpp
+!README.md
+!LICENSE
+!.gitignore
