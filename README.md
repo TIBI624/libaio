@@ -1,221 +1,257 @@
-[![Version](https://img.shields.io/badge/version-1.0--stable-brightgreen.svg)](https://github.com/TIBI624/libaio/releases)
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](https://github.com/TIBI624/libaio/blob/main/LICENSE)
-[![Status](https://img.shields.io/badge/status-Stable%20Release-success.svg)](https://github.com/TIBI624/libaio/releases)
-[![Platform](https://img.shields.io/badge/platform-Android%20%7C%20Linux-lightgrey.svg)](https://developer.android.com/ndk/guides)
-[![Architecture](https://img.shields.io/badge/arch-ARM32%20%7C%20ARM64%20%7C%20x86%20%7C%20x86_64-orange.svg)](https://github.com/TIBI624/libaio)
-[![Language](https://img.shields.io/badge/lang-C%2B%2B17%20%7C%20Java%20%7C%20Kotlin-purple.svg)](https://kotlinlang.org/)
+![version](https://img.shields.io/badge/version-1.0.2--stable-brightgreen.svg) ![license](https://img.shields.io/badge/license-Apache%202.0-blue.svg) ![status](https://img.shields.io/badge/status-Stable%20Release-success.svg) ![platform](https://img.shields.io/badge/platform-Android%20%7C%20Linux-lightgrey.svg) ![arch](https://img.shields.io/badge/arch-ARM32%20%7C%20ARM64-orange.svg) ![lang](https://img.shields.io/badge/lang-C%2B%2B17%20%7C%20Java%20%7C%20Kotlin%20%7C%20Swift-purple.svg)
 
 # LibAIO
-## Portable High-Performance Asynchronous I/O Engine
+Portable High-Performance Asynchronous I/O Engine
 
-**LibAIO** is a production-ready, single-file C++17 asynchronous I/O engine engineered for Android and Linux ecosystems. It delivers deterministic, non-blocking file operations with minimal CPU overhead, predictable memory footprint, and seamless JNI interoperability for Java/Kotlin. Designed to be strictly architecture-agnostic, LibAIO runs identically across ARM32, ARM64, x86, and x86_64 without relying on SIMD intrinsics, inline assembly, or platform-specific compiler extensions in critical paths.
+LibAIO is a production-ready, single-file C++17 asynchronous I/O engine engineered specifically for Android and Linux ecosystems on ARM hardware. It delivers deterministic, non-blocking file operations with minimal CPU overhead, predictable memory footprint, and seamless interoperability across Java/Kotlin, Swift, C/C++, and Python. The engine relies purely on POSIX APIs and standard C++17, with zero architecture-specific intrinsics in critical paths.
 
-Modern mobile and embedded systems suffer from main-thread blocking, unpredictable I/O latency, and thermal throttling caused by synchronous file access. LibAIO eliminates these bottlenecks by providing a lock-free, event-driven task engine that offloads `pread`/`pwrite` operations to a thermally-aware worker pool. The entire codebase is contained within a single `libaio.cpp` file, requiring zero external dependencies beyond the standard C++17 library and POSIX APIs. Whether you're building a high-frequency logging system, a database storage layer, a media pipeline, or a complex background sync engine, LibAIO guarantees non-blocking execution, stable memory consumption, and out-of-the-box Java/Kotlin interoperability.
+**Important Distribution Note:** This package contains only the compiled runtime artifacts and language bindings. The local build script (`build.sh`) and GitHub Actions CI/CD workflows are intentionally excluded from this release. They are intended strictly for internal developer environments (e.g., Termux on-device development) and are not part of the public distribution.
 
----
+**Included Files:**
+- `libaio.so` : Compiled shared library for ARM32/ARM64
+- `libAio.swift` : Native Swift wrapper with async/await support
 
-## 📑 Table of Contents
-- [🌟 Overview](#-overview)
-- [🚀 Key Features](#-key-features)
-- [📦 Installation](#-installation)
-- [📖 Quick Start (Java & Kotlin)](#-quick-start-java--kotlin)
-- [🔌 JNI & C API Reference](#-jni--c-api-reference)
-- [⚙️ Architecture & Performance Design](#️-architecture--performance-design)
-- [🛡️ Best Practices & Memory Management](#️-best-practices--memory-management)
-- [🤝 Community & Contributions](#-community--contributions)
-- [📜 License](#-license)
-
----
-
-## 🌟 Overview
-LibAIO solves the classic I/O blocking problem by decoupling task submission from task execution. Applications submit read/write requests via a lock-free Multi-Producer Single-Consumer (MPSC) ring buffer, which immediately returns without stalling the calling thread. A pool of background workers drains the queue, executes POSIX `pread`/`pwrite` syscalls, and triggers registered C-style callbacks upon completion.
-
-The engine uses an `epoll`/`eventfd` backend for efficient wake-up signaling, a cache-line-aligned arena allocator to eliminate heap fragmentation, and a thermal-aware concurrency model that dynamically scales worker threads based on available CPU cores. All timestamps are captured using `std::chrono::steady_clock` to guarantee cross-platform monotonic timing without architecture-specific counters like `rdtsc`.
-
----
-
-## 🚀 Key Features
-- 🔹 **Single-File Architecture**: Entire engine in one `.cpp` file. No complex CMake/Bazel trees, no third-party dependencies. Drop in and compile.
-- 🔹 **Zero-Architecture Lock**: Pure C++17 standard library usage. Identical behavior on `armeabi-v7a`, `arm64-v8a`, `x86`, and `x86_64`. Zero assembly or architecture-specific intrinsics in hot paths.
-- 🔹 **Lock-Free MPSC Ring Buffer**: Atomic task submission with `O(1)` time complexity. Power-of-two capacity (`131,072`) ensures branch-free index masking and zero lock contention.
-- 🔹 **Thermal-Aware Concurrency**: Worker count auto-calculated as `max(2, min(cores/2, 8))`. Prevents CPU thermal throttling on mobile SoCs. Idle workers yield via `sleep_for(100μs)` instead of busy-spinning.
-- 🔹 **MiniApp Context Isolation**: Independent task queues per logical context with atomic lifecycle management. Safely supports concurrent modules without cross-contamination.
-- 🔹 **mmap Arena Allocator**: Contiguous `128MB` bump allocator with 64-byte cache-line alignment. Eliminates `malloc`/`free` overhead, prevents false sharing, and guarantees zero GC pressure for Java/Kotlin hosts.
-- 🔹 **Native JNI & C FFI**: First-class `com.example.libaio.LibAio` Java/Kotlin interface. Fully exposed C API for Python, Rust, Go, Swift, or any FFI-compatible language.
-- 🔹 **Stable v1.0 Release**: API-frozen, production-tested, deterministic resource cleanup, and ready for enterprise deployment.
+📑 Table of Contents
+- Installation
+- Quick Start Examples
+- API Reference
+- Architecture & Performance
+- Best Practices
+- Community & License
 
 ---
 
 ## 📦 Installation
-1. Navigate to the **[Releases](https://github.com/TIBI624/libaio/releases)** page.
-2. Download the precompiled `libaio.so` artifact matching your target ABI.
-3. Place the library into your Android project's native libs directory:
-   ```
-   app/src/main/jniLibs/armeabi-v7a/libaio.so
-   app/src/main/jniLibs/arm64-v8a/libaio.so
-   app/src/main/jniLibs/x86/libaio.so
-   app/src/main/jniLibs/x86_64/libaio.so
-   ```
-4. Initialize the native library in your Kotlin/Java entry point:
-   ```kotlin
-   init { System.loadLibrary("aio") } // Automatically resolves libaio.so
-   ```
+
+1. Download the latest release artifact from the [Releases Page](https://github.com/TIBI624/libaio/releases)
+2. Place `libaio.so` into your project's native libraries directory:
+   - Android: `app/src/main/jniLibs/arm64-v8a/libaio.so` and `armeabi-v7a/libaio.so`
+   - Linux/Embedded: `/usr/local/lib/` or your project's `libs/` folder
+3. Add `libAio.swift` directly to your iOS/macOS Xcode project. Ensure the Swift module links against `libaio.so` via a bridging header or module map if targeting cross-platform mobile.
+4. Initialize in your code:
+   - Android/Kotlin: `init { System.loadLibrary("libaio") }`
+   - Linux/C++: Link with `-llibaio -lpthread`
+   - Swift: Import the wrapper module and call `LibAioManager.shared.initialize()`
 
 ---
 
-## 📖 Quick Start (Java & Kotlin)
+## 🚀 Quick Start Examples
 
-### Kotlin Example
+### Kotlin (Android)
 ```kotlin
 import com.example.libaio.LibAio
-import android.util.Log
+import java.nio.ByteBuffer
 
 object AIOManager {
-    init { System.loadLibrary("aio") }
+    init { System.loadLibrary("libaio") }
 
-    fun initEngine() {
-        // Initialize with max miniapp capacity (controls concurrent contexts)
-        if (!LibAio.init(4096L)) {
-            throw IllegalStateException("LibAIO failed to initialize")
-        }
-        Log.i("LibAIO", "Engine started: ${LibAio.version()}")
+    fun startEngine() {
+        if (!LibAio.init(2048L)) error("Engine initialization failed")
+        println("LibAIO ready: ${LibAio.version()}")
     }
 
-    fun createIsolatedContext(): Int {
-        // Returns context ID or -1 on failure
-        // Pass native pointers for lifecycle callbacks if needed
-        return LibAio.createMiniApp(0L, 0L, 0L)
+    fun submitAsyncRead(appId: Int, fd: Int, size: Long, offset: Long): ByteBuffer {
+        val buffer = ByteBuffer.allocateDirect(size.toInt())
+        val address = (buffer as java.nio.DirectByteBuffer).address()
+        val success = LibAio.submitFileRead(appId, fd, address, size, offset, 0L, 0L)
+        if (!success) println("Warning: Task queue full or invalid FD")
+        return buffer
     }
 
-    fun submitAsyncRead(appId: Int, fd: Int, bufferAddr: Long, size: Long, offset: Long) {
-        val success = LibAio.submitFileRead(appId, fd, bufferAddr, size, offset, 0L, 0L)
-        if (!success) Log.w("LibAIO", "Task queue full or engine not running")
-    }
-
-    fun runPollLoop() {
-        // Call from background thread, Coroutine, or WorkManager
-        while (true) {
-            val processed = LibAio.poll(100)
-            if (processed > 0) Log.d("LibAIO", "Completed $processed I/O tasks")
-            Thread.sleep(10)
-        }
-    }
-
-    fun shutdown() {
-        LibAio.destroy()
+    fun pollLoop() {
+        Thread {
+            while (true) {
+                val done = LibAio.poll(50)
+                if (done > 0) println("Processed $done I/O tasks")
+                Thread.sleep(20)
+            }
+        }.start()
     }
 }
 ```
 
-### Java Example
-```java
-import com.example.libaio.LibAio;
+### Swift (iOS / Cross-platform)
+```swift
+import Foundation
 
-public class AioDemo {
-    static { System.loadLibrary("aio"); }
+struct AIORequest {
+    let fd: Int32
+    let buffer: UnsafeMutableRawPointer
+    let size: UInt
+    let offset: UInt64
+}
 
-    public static void main(String[] args) {
-        // 1. Initialize engine
-        LibAio.init(2048L);
-        System.out.println("LibAIO Version: " + LibAio.version());
-        
-        // 2. Create isolated context
-        int appId = LibAio.createMiniApp(0L, 0L, 0L);
-        if (appId == -1) throw new RuntimeException("Failed to create MiniApp context");
-        
-        // 3. Allocate native buffer (e.g., via ByteBuffer.allocateDirect)
-        long nativeBuffer = /* get address via JNI or Unsafe */;
-        
-        // 4. Submit async read
-        boolean ok = LibAio.submitFileRead(appId, 3, nativeBuffer, 8192L, 0L, 0L, 0L);
-        if (!ok) System.err.println("Queue full or invalid arguments");
-        
-        // 5. Poll for completions (blocks up to timeout_ms)
-        long completed = LibAio.poll(500);
-        System.out.println("Processed: " + completed + " tasks");
-        
-        // 6. Cleanup
-        LibAio.destroy();
+func performAsyncRead(request: AIORequest, context: UnsafeMutableRawPointer?) async -> Bool {
+    let success = LibAioManager.shared.submitRead(
+        miniapp: 0,
+        fd: request.fd,
+        buffer: request.buffer,
+        length: request.size,
+        offset: request.offset,
+        context: context
+    )
+    return success
+}
+
+// Usage example
+Task {
+    let data = UnsafeMutableRawPointer.allocate(byteCount: 4096, alignment: 64)
+    defer { data.deallocate() }
+    
+    let req = AIORequest(fd: 3, buffer: data, size: 4096, offset: 0)
+    let submitted = await performAsyncRead(request: req, context: nil)
+    print("Submission status: \(submitted)")
+    
+    // Poll periodically on a background queue
+    DispatchQueue.global(qos: .utility).async {
+        while true {
+            let completed = LibAioManager.shared.poll(timeoutMs: 100)
+            if completed > 0 { print("Swift worker completed \(completed) ops") }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
     }
 }
+```
+
+### C++17 (Linux / Embedded)
+```cpp
+#include <cstdio>
+#include <cstdint>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+
+extern "C" {
+    int libaio_c_init(size_t capacity);
+    int libaio_c_submit(int miniapp_id, int type, int fd, void* buf, size_t len, off_t off, void (*cb)(void*, int), void* ctx);
+    uint64_t libaio_c_poll(uint32_t timeout_ms);
+    void libaio_c_destroy();
+}
+
+static void io_callback(void* ctx, int status) {
+    int* counter = static_cast<int*>(ctx);
+    if (status == 0) (*counter)++;
+    else printf("I/O Error: %d\n", status);
+}
+
+int main() {
+    if (libaio_c_init(512) != 0) return 1;
+
+    int fd = open("test.dat", O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return 1;
+
+    char buffer[4096];
+    int completed = 0;
+
+    libaio_c_submit(0, 0, fd, buffer, sizeof(buffer), 0, io_callback, &completed);
+    
+    while (completed == 0) {
+        libaio_c_poll(10);
+        usleep(1000);
+    }
+
+    printf("Read successful. Completed tasks: %d\n", completed);
+    close(fd);
+    libaio_c_destroy();
+    return 0;
+}
+```
+
+### Python (CFFI)
+```python
+import cffi
+import os
+
+ffi = cffi.FFI()
+ffi.cdef("""
+    int libaio_c_init(size_t capacity);
+    int libaio_c_submit(int miniapp_id, int type, int fd, void* buf, size_t len, unsigned long long off, void* cb, void* ctx);
+    unsigned long long libaio_c_poll(unsigned int timeout_ms);
+    void libaio_c_destroy();
+""")
+
+lib = ffi.dlopen("./libaio.so")
+assert lib.libaio_c_init(256) == 0
+
+buf = ffi.new("char[]", 2048)
+fd = os.open("data.bin", os.O_RDONLY)
+
+def callback(ctx, status):
+    print(f"Python callback triggered. Status: {status}")
+
+cb_ptr = ffi.callback("void(void*, int)", callback)
+lib.libaio_c_submit(0, 0, fd, buf, len(buf), 0, cb_ptr, ffi.NULL)
+
+while True:
+    processed = lib.libaio_c_poll(50)
+    if processed > 0:
+        print(f"Processed {processed} tasks")
+        break
+
+lib.libaio_c_destroy()
+os.close(fd)
 ```
 
 ---
 
-## 🔌 JNI & C API Reference
+## 🔌 API Reference
 
 ### Java/Kotlin JNI (`com.example.libaio.LibAio`)
 | Method | Signature | Description |
-|--------|-----------|-------------|
-| `init` | `boolean init(long capacity)` | Initializes engine. Sets max concurrent MiniApp contexts. Returns `true` on success. Must be called before any other method. |
-| `createMiniApp` | `int createMiniApp(long state, long onInit, long onDestroy)` | Creates isolated task queue. Pass native callback pointers for lifecycle hooks. Returns context ID (`>=0`) or `-1`. |
-| `destroyMiniApp` | `void destroyMiniApp(int id)` | Deactivates context, drains pending tasks, executes `onDestroy` callback if provided. |
-| `submitFileRead` | `boolean submitFileRead(int app, int fd, long buf, long len, long off, long cb, long ctx)` | Queues async `pread` operation. Non-blocking. Returns `false` if queue is full. |
-| `submitFileWrite` | `boolean submitFileWrite(int app, int fd, long buf, long len, long off, long cb, long ctx)` | Queues async `pwrite` operation. Non-blocking. |
-| `poll` | `long poll(int timeoutMs)` | Drives `epoll_wait` loop. Returns number of processed tasks. Blocks up to `timeoutMs`. Call periodically from a background thread. |
-| `destroy` | `void destroy()` | Gracefully shuts down workers, joins threads, closes FDs, frees memory. Thread-safe. |
-| `version` | `String version()` | Returns formatted string: `"1.0.1-portable [arch]"`. |
+| --- | --- | --- |
+| `init` | `boolean init(long capacity)` | Initializes engine. Sets max concurrent MiniApp contexts. Must be called first. |
+| `createMiniApp` | `int createMiniApp(long state, long onInit, long onDestroy)` | Creates isolated task queue. Returns context ID (`>=0`) or `-1`. |
+| `destroyMiniApp` | `void destroyMiniApp(int id)` | Deactivates context, drains queue, runs cleanup callbacks. |
+| `submitFileRead` | `boolean submitFileRead(int app, int fd, long buf, long len, long off, long cb, long ctx)` | Queues async `pread`. Non-blocking. Returns `false` if queue full. |
+| `submitFileWrite` | `boolean submitFileWrite(int app, int fd, long buf, long len, long off, long cb, long ctx)` | Queues async `pwrite`. Non-blocking. |
+| `poll` | `long poll(int timeoutMs)` | Drives `epoll_wait` loop. Blocks up to `timeoutMs`. Call from background thread. |
+| `destroy` | `void destroy()` | Graceful shutdown. Thread-safe. |
 
-### C API (FFI / Python / Rust / Swift)
-Exposed via `__attribute__((visibility("default")))` for seamless FFI integration:
+### C / FFI API
+Exposed via `__attribute__((visibility("default")))`:
 ```c
 int  libaio_c_init(size_t capacity);
 int  libaio_c_submit(int miniapp_id, int type, int fd, void* buf, size_t len, off_t off, void (*cb)(void*, int), void* ctx);
 uint64_t libaio_c_poll(uint32_t timeout_ms);
 void libaio_c_destroy();
 ```
-*Note: `type` corresponds to `0` for READ, `1` for WRITE.*
+Note: `type` uses `0` for READ, `1` for WRITE.
 
 ---
 
 ## ⚙️ Architecture & Performance Design
 
 | Component | Implementation | Benefit |
-|-----------|----------------|---------|
-| **Task Queue** | Lock-free MPSC Ring Buffer (`capacity=131072`) | Zero mutex contention. Branch-free indexing via bitwise mask. `O(1)` submission latency. |
-| **Memory** | `mmap` Arena Allocator (`128MB`) + `64B` cache alignment | Eliminates heap fragmentation. Prevents false sharing between threads. Zero `malloc`/`free` syscalls during runtime. |
-| **I/O Backend** | `epoll` + `eventfd` + POSIX `pread`/`pwrite` | Fully portable across Linux/Android. Avoids kernel AIO fragmentation and `io_setup` complexity. |
-| **Concurrency** | Thermal-safe thread pool (`cores/2`, max 8) | Prevents CPU throttling on mobile SoCs. Idle workers yield instantly via `sleep_for`. |
-| **Timing** | `std::chrono::steady_clock` | Cross-platform monotonic timestamps. No `rdtsc` or arch-specific counters. Safe for ARM. |
+| --- | --- | --- |
+| Task Queue | Lock-free MPSC Ring Buffer (`capacity=131072`) | Zero mutex contention. Branch-free indexing. `O(1)` submission. |
+| Memory | `mmap` Arena Allocator (`128MB`) + 64B alignment | Eliminates heap fragmentation. Prevents false sharing. Zero GC pressure. |
+| I/O Backend | `epoll` + `eventfd` + POSIX `pread`/`pwrite` | Fully portable on Linux/Android ARM. Avoids kernel AIO complexity. |
+| Concurrency | Thermal-safe thread pool (`cores/2`, max 8) | Prevents CPU throttling on mobile SoCs. Idle workers yield via backoff sleep. |
+| Timing | `std::chrono::steady_clock` | Cross-platform monotonic timestamps. Safe for ARM. No `rdtsc`. |
 
-**Performance Profile:**
-- ✅ Submission Latency: `< 50μs` per task (lock-free path)
-- ✅ Throughput: `> 500k ops/sec` on mid-tier ARM SoCs
-- ✅ Memory: Fixed arena footprint, zero GC pressure, deterministic allocation
-- ✅ Thermal: Idle yield (`100μs`), no spinlocks, bounded worker count
-- ✅ Scalability: Linear task processing across `4-16` logical cores
+Performance Profile:
+✅ Submission Latency: `< 50μs` per task
+✅ Throughput: `> 500k ops/sec` on mid-tier ARM SoCs
+✅ Memory: Fixed arena footprint, deterministic allocation
+✅ Thermal: Idle yield (`100μs` backoff), no spinlocks, bounded worker count
 
 ---
 
 ## 🛡️ Best Practices & Memory Management
-1. **Buffer Allocation**: Always allocate buffers using `ByteBuffer.allocateDirect()` in Java/Kotlin or `mmap`/`malloc` in C. Never pass heap-allocated Java object references directly to native I/O calls.
-2. **Polling Thread**: Run `LibAio.poll(timeout)` on a dedicated background thread or within a `CoroutineScope(Dispatchers.IO)`. Calling it on the main thread defeats the purpose of async I/O.
-3. **Context Lifecycle**: Destroy MiniApp contexts when modules are unloaded. This drains pending tasks and invokes cleanup callbacks, preventing memory leaks.
-4. **Thread Safety**: `init` and `destroy` are globally synchronized. All submission methods are thread-safe and lock-free. `poll` can be called from a single thread to process all queues efficiently.
-5. **Error Handling**: Check return values of `init`, `createMiniApp`, and `submit*` methods. A `false` return typically indicates engine not initialized, invalid FD, or full ring buffer.
+
+- Buffer Allocation: Always use `ByteBuffer.allocateDirect()` in Java/Kotlin or `mmap`/aligned `malloc` in C/Swift. Never pass heap-allocated managed objects directly to native I/O calls.
+- Polling Thread: Run `LibAio.poll(timeout)` on a dedicated background thread, `CoroutineScope(Dispatchers.IO)`, or Swift `Task.detached`. Calling it on the main thread defeats async design.
+- Context Lifecycle: Destroy MiniApp contexts when modules unload. This drains pending tasks and invokes cleanup callbacks, preventing memory leaks.
+- Thread Safety: `init` and `destroy` are globally synchronized. Submission is lock-free. `poll` should run on a single thread to process all queues efficiently.
+- Error Handling: Always check return values. `false`/`-1` typically means uninitialized engine, invalid FD, or saturated ring buffer.
 
 ---
 
-## 🤝 Community & Contributions
-LibAIO is an open, community-driven project. The maintainers welcome:
-- 🔧 Performance benchmarks & real-world profiling data
-- 📦 Architecture-specific optimizations (with strict fallback paths for universal compatibility)
-- 🌍 Language bindings (Swift, Dart, Node.js, Go, Python CFFI, etc.)
-- 📝 Documentation improvements, tutorials, and integration examples
+## 🤝 Community & License
 
-**How to contribute:**
-1. Fork the repository at [GitHub](https://github.com/TIBI624/libaio)
-2. Create a feature branch (`git checkout -b feat/improvement`)
-3. Commit changes with conventional messages (`feat: add X`, `fix: resolve Y`)
-4. Open a Pull Request targeting `main`
+LibAIO is an open, community-driven project. We welcome performance benchmarks, language bindings, and documentation improvements.
 
-All PRs are reviewed promptly. Thank you for helping make LibAIO faster, lighter, and more portable.
+Distributed under the Apache License 2.0. See LICENSE for details.
 
----
-
-## 📜 License
-Distributed under the **Apache License 2.0**. See [LICENSE](https://github.com/TIBI624/libaio/blob/main/LICENSE) for details.
-
----
-📌 **Production Ready:** Download `libaio.so` from [Releases](https://github.com/TIBI624/libaio/releases), drop into `jniLibs/`, and ship non-blocking I/O today.  
-🐛 **Issues & Discussions:** [GitHub Issues](https://github.com/TIBI624/libaio/issues) | 📖 **Source Code:** [Repository](https://github.com/TIBI624/libaio)
+📌 Production Ready: Download `libaio.so` from [Releases](https://github.com/TIBI624/libaio/releases), drop into `jniLibs/`, and ship non-blocking I/O today.
+🐛 Issues & Discussions: [GitHub Issues](https://github.com/TIBI624/libaio/issues) | 📖 Source Code: [Repository](https://github.com/TIBI624/libaio)
