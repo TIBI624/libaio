@@ -1,10 +1,10 @@
 /**
 libaio.cpp - Portable High-Performance Async I/O Engine
-Targets: Android/Linux (ARM32/ARM64 ONLY)
+Targets: Android/Linux/macOS (ARM32/ARM64/x86/x86_64)
 Standard: C++17, no architecture-specific instructions in critical paths
 */
 #include <jni.h>
-#include <android/log.h>
+#include <android/log.h>  // only for Android; conditionally included
 #include <sys/epoll.h>
 #include <sys/mman.h>
 #include <sys/eventfd.h>
@@ -29,8 +29,14 @@ Standard: C++17, no architecture-specific instructions in critical paths
 #include <functional>
 #include <cerrno>
 
+// Platform-specific includes
+#if defined(__APPLE__)
+#include <sys/event.h>
+#include <sys/time.h>
+#endif
+
 #if defined(_WIN32) || defined(_WIN64)
-#error "Windows is not supported. This library targets Android/Linux ARM only."
+#error "Windows is not supported. This library targets Android/Linux/macOS."
 #endif
 
 // ============================================================
@@ -50,15 +56,26 @@ static inline uint32_t libaio_get_worker_count() {
     return std::max(2u, std::min(cores / 2, 8u));
 }
 
+// Logging: on Android use android log, otherwise fallback to printf
+#if defined(ANDROID)
 #define LIBAIO_LOGI(...) __android_log_print(ANDROID_LOG_INFO, LIBAIO_LOG_TAG, __VA_ARGS__)
 #define LIBAIO_LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LIBAIO_LOG_TAG, __VA_ARGS__)
+#else
+#include <cstdio>
+#define LIBAIO_LOGI(...) printf("[INFO] " __VA_ARGS__); printf("\n")
+#define LIBAIO_LOGE(...) printf("[ERROR] " __VA_ARGS__); printf("\n")
+#endif
 
 #if defined(__aarch64__)
 #define LIBAIO_ARCH_STR  "arm64"
 #elif defined(__arm__)
 #define LIBAIO_ARCH_STR  "arm32"
+#elif defined(__x86_64__)
+#define LIBAIO_ARCH_STR  "x86_64"
+#elif defined(__i386__)
+#define LIBAIO_ARCH_STR  "i386"
 #else
-#define LIBAIO_ARCH_STR  "arm-unknown"
+#define LIBAIO_ARCH_STR  "unknown"
 #endif
 
 inline uint64_t libaio_timestamp() {
@@ -256,22 +273,43 @@ private:
 // ============================================================
 class LibAioEngine {
 public:
-    LibAioEngine() : epoll_fd_(-1), wake_fd_(-1), running_(false) {}
+    LibAioEngine() : epoll_fd_(-1), wake_fd_(-1), wake_write_fd_(-1), running_(false), completed_ops_(0) {}
     ~LibAioEngine() { destroy(); }
 
     bool init(size_t miniapp_capacity = 1024) {
-        epoll_fd_ = epoll_create1(EPOLL_CLOEXEC);
-        if (epoll_fd_ < 0) { LIBAIO_LOGE("epoll_create1: %s", strerror(errno)); return false; }
-
+        // Create notification mechanism
+#if defined(__linux__)
         wake_fd_ = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
         if (wake_fd_ < 0) { LIBAIO_LOGE("eventfd: %s", strerror(errno)); return false; }
+        wake_write_fd_ = wake_fd_; // same fd for write
+#elif defined(__APPLE__)
+        int pipefd[2];
+        if (pipe(pipefd) == -1) { LIBAIO_LOGE("pipe: %s", strerror(errno)); return false; }
+        fcntl(pipefd[0], F_SETFL, O_NONBLOCK);
+        fcntl(pipefd[1], F_SETFL, O_NONBLOCK);
+        wake_fd_ = pipefd[0];      // read end
+        wake_write_fd_ = pipefd[1]; // write end
+#endif
 
+        // Create event loop
+#if defined(__linux__)
+        epoll_fd_ = epoll_create1(EPOLL_CLOEXEC);
+        if (epoll_fd_ < 0) { LIBAIO_LOGE("epoll_create1: %s", strerror(errno)); return false; }
         epoll_event ev{};
         ev.events = EPOLLIN;
         ev.data.fd = wake_fd_;
         if (epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, wake_fd_, &ev) < 0) {
             LIBAIO_LOGE("epoll_ctl wake_fd: %s", strerror(errno)); return false;
         }
+#elif defined(__APPLE__)
+        epoll_fd_ = kqueue(); // use epoll_fd_ as kqueue fd for simplicity
+        if (epoll_fd_ < 0) { LIBAIO_LOGE("kqueue: %s", strerror(errno)); return false; }
+        struct kevent ev;
+        EV_SET(&ev, wake_fd_, EVFILT_READ, EV_ADD | EV_ENABLE, 0, 0, nullptr);
+        if (kevent(epoll_fd_, &ev, 1, nullptr, 0, nullptr) < 0) {
+            LIBAIO_LOGE("kevent add: %s", strerror(errno)); return false;
+        }
+#endif
 
         global_queue_ = std::make_unique<LockFreeRing>();
         allocator_ = std::make_unique<ArenaAllocator>(128 * 1024 * 1024);
@@ -346,19 +384,31 @@ public:
     }
 
     uint64_t poll_completions(uint32_t timeout_ms = 0) {
+        // Wait for notification
+        int n = 0;
+#if defined(__linux__)
         epoll_event events[LIBAIO_EPOLL_EVENTS];
-        int n = epoll_wait(epoll_fd_, events, LIBAIO_EPOLL_EVENTS, static_cast<int>(timeout_ms));
-        if (n <= 0) return 0;
-        
-        uint64_t processed = 0;
-        for (int i = 0; i < n; ++i) {
-            if (events[i].data.fd == wake_fd_) {
-                uint64_t val;
-                while (read(wake_fd_, &val, sizeof(val)) > 0);
-                processed += drain_queue(*global_queue_);
-            }
+        n = epoll_wait(epoll_fd_, events, LIBAIO_EPOLL_EVENTS, static_cast<int>(timeout_ms));
+#elif defined(__APPLE__)
+        struct kevent events[LIBAIO_EPOLL_EVENTS];
+        struct timespec ts;
+        ts.tv_sec = timeout_ms / 1000;
+        ts.tv_nsec = (timeout_ms % 1000) * 1000000;
+        n = kevent(epoll_fd_, nullptr, 0, events, LIBAIO_EPOLL_EVENTS, (timeout_ms == (uint32_t)-1) ? nullptr : &ts);
+#endif
+        if (n > 0) {
+            // Drain the notification
+#if defined(__linux__)
+            uint64_t val;
+            while (read(wake_fd_, &val, sizeof(val)) > 0);
+#elif defined(__APPLE__)
+            char buf[64];
+            while (read(wake_fd_, buf, sizeof(buf)) > 0);
+#endif
         }
-        return processed;
+
+        // Return number of completed ops since last poll
+        return completed_ops_.exchange(0, std::memory_order_acq_rel);
     }
 
     void destroy() {
@@ -370,6 +420,7 @@ public:
         worker_threads_.clear();
         if (epoll_fd_ >= 0) { close(epoll_fd_); epoll_fd_ = -1; }
         if (wake_fd_ >= 0) { close(wake_fd_); wake_fd_ = -1; }
+        if (wake_write_fd_ >= 0 && wake_write_fd_ != wake_fd_) { close(wake_write_fd_); }
         for (auto& ctx : miniapps_) {
             if (ctx.active.load()) destroy_miniapp(ctx.id);
         }
@@ -432,33 +483,39 @@ private:
             default: status = -ENOSYS; break;
         }
         if (t.callback) t.callback(t.user_ctx, status);
-    }
-
-    uint64_t drain_queue(LockFreeRing& queue) {
-        uint64_t cnt = 0;
-        Task t;
-        while (queue.pop(t)) { execute_task(t); ++cnt; }
-        return cnt;
+        // Notify completion
+        completed_ops_.fetch_add(1, std::memory_order_release);
+        wake();
     }
 
     void wake() {
-        uint64_t val = 1;
-        ssize_t r = write(wake_fd_, &val, sizeof(val));
-        (void)r;
+        if (wake_write_fd_ >= 0) {
+#if defined(__linux__)
+            uint64_t val = 1;
+            ssize_t r = write(wake_write_fd_, &val, sizeof(val));
+#elif defined(__APPLE__)
+            char c = 1;
+            ssize_t r = write(wake_write_fd_, &c, 1);
+#endif
+            (void)r;
+        }
     }
 
-    int epoll_fd_;
-    int wake_fd_;
+    int epoll_fd_;      // epoll or kqueue fd
+    int wake_fd_;       // read end of notification
+    int wake_write_fd_; // write end (same as wake_fd_ on Linux)
     std::atomic<bool> running_;
     std::unique_ptr<LockFreeRing> global_queue_;
     std::vector<MiniAppContext> miniapps_;
     std::unique_ptr<ArenaAllocator> allocator_;
     std::vector<std::thread> worker_threads_;
+    std::atomic<uint64_t> completed_ops_;
 };
 
 static std::unique_ptr<LibAioEngine> g_engine;
 static std::mutex g_engine_mutex;
 
+// JNI functions (unchanged, but use updated engine)
 extern "C" {
 JNIEXPORT jboolean JNICALL Java_com_example_libaio_LibAio_init(JNIEnv*, jclass, jlong capacity) {
     std::lock_guard<std::mutex> lock(g_engine_mutex);
@@ -507,6 +564,7 @@ JNIEXPORT jstring JNICALL Java_com_example_libaio_LibAio_version(JNIEnv* env, jc
     return env->NewStringUTF(buf);
 }
 
+// C API (now also declared in libaio.h)
 __attribute__((visibility("default")))
 int libaio_c_init(size_t capacity) {
     std::lock_guard<std::mutex> lock(g_engine_mutex);

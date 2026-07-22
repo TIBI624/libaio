@@ -1,0 +1,34 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  release:
+    types: [created]
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y clang cmake
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install cmake
+      - name: Build
+        run: |
+          mkdir build && cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release -DLIBAIO_ENABLE_TESTS=OFF -DLIBAIO_VERSION=1.0.3
+          make -j$(nproc)
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: libaio-${{ runner.os }}-${{ runner.arch }}
+          path: build/libaio.*
