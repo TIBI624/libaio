@@ -4,15 +4,20 @@ Targets: Android/Linux/macOS (ARM32/ARM64/x86/x86_64)
 Standard: C++17, no architecture-specific instructions in critical paths
 */
 #include <jni.h>
-#include <android/log.h>  // only for Android; conditionally included
-#include <sys/epoll.h>
+
+// Platform-specific includes
+#if defined(ANDROID)
+#include <android/log.h>
+#endif
+
+// Common POSIX headers
 #include <sys/mman.h>
-#include <sys/eventfd.h>
 #include <sys/stat.h>
-#include <sys/syscall.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <pthread.h>
+
+// C++ standard headers
 #include <atomic>
 #include <vector>
 #include <cstring>
@@ -29,7 +34,12 @@ Standard: C++17, no architecture-specific instructions in critical paths
 #include <functional>
 #include <cerrno>
 
-// Platform-specific includes
+#if defined(__linux__)
+#include <sys/epoll.h>
+#include <sys/eventfd.h>
+// sys/syscall.h не используется, можно удалить
+#endif
+
 #if defined(__APPLE__)
 #include <sys/event.h>
 #include <sys/time.h>
