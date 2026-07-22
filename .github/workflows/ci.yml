@@ -34,7 +34,12 @@ jobs:
       - name: Build
         run: |
           mkdir build && cd build
-          cmake .. -DCMAKE_BUILD_TYPE=Release -DLIBAIO_ENABLE_TESTS=OFF -DLIBAIO_VERSION=1.0.3
+          cmake .. \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLIBAIO_ENABLE_TESTS=OFF \
+            -DLIBAIO_VERSION=1.0.3 \
+            -DJAVA_HOME="$JAVA_HOME"
+          
           if [ "${{ runner.os }}" = "macOS" ]; then
             JOBS=$(sysctl -n hw.ncpu)
           else
@@ -47,3 +52,4 @@ jobs:
         with:
           name: libaio-${{ runner.os }}-${{ runner.arch }}
           path: build/libaio.*
+
