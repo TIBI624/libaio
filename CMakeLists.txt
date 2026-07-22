@@ -5,6 +5,9 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# --- Find and configure JNI ---
+find_package(JNI REQUIRED)
+
 option(BUILD_SHARED_LIBS "Build shared library" ON)
 option(LIBAIO_ENABLE_TESTS "Enable tests" OFF)
 
@@ -30,7 +33,7 @@ if(ANDROID)
     target_compile_definitions(libaio PRIVATE LIBAIO_LOG_TAG="libaio_native")
     target_link_libraries(libaio PRIVATE log android)
 else()
-    target_link_libraries(libaio PRIVATE pthread)
+    target_link_libraries(libaio PRIVATE pthread ${JNI_LIBRARIES})
     if(APPLE)
         # No extra libs for macOS
     endif()
@@ -52,6 +55,7 @@ endif()
 target_include_directories(libaio PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
     $<INSTALL_INTERFACE:include>
+    ${JNI_INCLUDE_DIRS}
 )
 
 install(TARGETS libaio
